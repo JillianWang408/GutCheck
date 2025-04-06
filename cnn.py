@@ -150,6 +150,44 @@ def get_data_loaders(batch_size, X, y):
     val_loader = DataLoader(val_ds, batch_size=batch_size)
     return train_loader, val_loader
 
+def predict_confidence_score(model: nn.Module, data: np.ndarray, scaler: StandardScaler, device: str = "cpu"):
+    """
+    Predict confidence scores for new EEG data using the trained CNN model.
+
+    Args:
+        model (nn.Module): Trained PyTorch model.
+        data (np.ndarray): Raw EEG data of shape [samples, channels].
+        scaler (StandardScaler): Pre-fitted scaler from training.
+        device (str): "cpu" or "cuda".
+
+    Returns:
+        List[float]: Confidence scores per window.
+    """
+    model.eval()
+    model.to(device)
+
+    # Apply scaling
+    data_scaled = scaler.transform(data)
+
+    # Create windows
+    X_windows = []
+    for i in range(0, len(data_scaled) - WINDOW_SIZE, STRIDE):
+        window = data_scaled[i:i+WINDOW_SIZE]
+        if window.shape[0] == WINDOW_SIZE:
+            X_windows.append(window.T)  # Shape: [channels, time]
+
+    if not X_windows:
+        raise ValueError("Input too short to create a single valid window.")
+
+    # Convert to tensor
+    X_tensor = torch.tensor(np.stack(X_windows), dtype=torch.float32).to(device)
+
+    # Run inference
+    with torch.no_grad():
+        outputs = model(X_tensor).squeeze(1).cpu().numpy()
+
+    return outputs.tolist()
+
 # Usage
 if __name__ == "__main__":
     X, y = preprocess()
