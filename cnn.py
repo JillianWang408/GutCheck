@@ -6,13 +6,18 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
+from torch.utils.data import DataLoader, TensorDataset
+from sklearn.preprocessing import StandardScaler
+
+WINDOW_SIZE = 256
+STRIDE = 128
 
 class ConfidenceCNN(nn.Module):
     def __init__(self):
         super().__init__()
         # conv layer 1
         self.cnv1 = nn.Sequential(
-            nn.Conv1d(4, 16, kernel_size=5), # play with kernel size during train
+            nn.Conv1d(2, 16, kernel_size=5), # play with kernel size during train
             nn.LazyBatchNorm1d(),
             nn.ReLU(),
             nn.MaxPool1d(2),
@@ -37,11 +42,11 @@ class ConfidenceCNN(nn.Module):
         #    nn.Dropout(0.4)
         #)
 
-        self.global_pool = nn.AdaptiveAvgPool1d(4)
+        self.global_pool = nn.AdaptiveAvgPool1d(2)
 
         # output layer
         self.out = nn.Sequential(
-            nn.Linear(32*4, 64), # switch to (64, 64) if 3 conv layers
+            nn.Linear(32*2, 64), # switch to (64, 64) if 3 conv layers
             nn.ReLU(),
             nn.Dropout(0.5),
             nn.Linear(64, 1)
@@ -94,17 +99,48 @@ def validate(model, val_loader, criterion, device):
     print(f"Validation Loss: {avg_val_loss:.4f}")
 
 # to be implemented
-def preprocess(df):
-    coll = [
-        1 #placeholder
-    ]
-    df['conf'] = pd.DataFrame(np.array(coll).T)
+def preprocess():
+    def load_filtered(path):
+        df = pd.read_csv(path)
+        return df[[col for col in df.columns if 'alpha' in col.lower() or 'gamma' in col.lower()]].values
 
-# Example dataset setup
-def get_data_loaders(df):
-    X = df[:256]
-    y = df["conf"]  # confidence score in [0, 1]
+    hf1 = load_filtered(r"C:\Users\James\Desktop\neurotech-hackathon-2025\train_data\eeg_bands_data_20250406_131204-highconfidence.csv")
+    amb1 = load_filtered(r"C:/Users/James/Desktop/neurotech-hackathon-2025/train_data/eeg_bands_data_20250406_132151-amgiguous.csv")
+    amb2 = load_filtered(r"C:/Users/James/Desktop/neurotech-hackathon-2025/train_data/eeg_bands_data_20250406_133720-ambigous-jillian.csv")
 
+    # Confidence labels for each dataset
+    coll = [1.0, 1.0, 0.9, 1.0, 1.0, 1.0, 1.0, 0.8, 1.0, 1.0,
+            0.95, 0.9, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0,
+            0.8, 1.0, 1.0, 1.0, 1.0, 0.95, 1.0, 0.96, 0.9, 0.85,
+            0.4, 0.6, 0.7, 0.9, 0.3, 0.5, 0.1, 0.3, 0.8, 0.4,
+            0.4, 0.3, 0.2, 0.5, 0.6, 0.3, 0.65, 0.4, 0.2, 0.7, 0.5,
+            0.6, 0.9, 0.4, 0.3, 0.7, 0.32, 0.7, 0.2, 0.8, 0.2]
+    coll2 = [0.1, 0.7, 0.3, 0.2, 0.5, 0.2, 0.8, 0.2, 0.3, 0.1,
+             0.7, 0.7, 0.1, 0.1, 0.6, 0.2, 0.4, 0.1, 0.6, 0.0,
+             0.7, 0.8, 0.2, 0.7, 0.7, 0.0, 0.7, 0.2, 0.7, 0.8]
+
+    X_raw = np.concatenate([amb1, hf1, amb2], axis=0)
+    y_raw = coll + coll2
+    y_raw = np.array(y_raw)
+
+    scaler = StandardScaler()
+    X_raw = scaler.fit_transform(X_raw)
+
+    X_windows = []
+    y_windows = []
+
+    for i in range(0, len(X_raw) - WINDOW_SIZE, STRIDE):
+        window = X_raw[i:i+WINDOW_SIZE]
+        if window.shape[0] == WINDOW_SIZE:
+            X_windows.append(window.T)  # Shape: [channels, time]
+            y_windows.append(y_raw[i // STRIDE])
+
+    X_tensor = torch.tensor(np.stack(X_windows), dtype=torch.float32)
+    y_tensor = torch.tensor(y_windows, dtype=torch.float32)
+    return X_tensor, y_tensor
+
+
+def get_data_loaders(batch_size, X, y):
     dataset = TensorDataset(X, y)
     train_len = int(0.8 * len(dataset))
     val_len = len(dataset) - train_len
@@ -116,6 +152,8 @@ def get_data_loaders(df):
 
 # Usage
 if __name__ == "__main__":
+    X, y = preprocess()
+    train_loader, val_loader = get_data_loaders(batch_size=32, X=X, y=y)
     model = ConfidenceCNN()
-    train_loader, val_loader = get_data_loaders()
-    train(model, train_loader, val_loader, epochs=10, lr=1e-3, device="cuda" if torch.cuda.is_available() else "cpu")
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    train(model, train_loader, val_loader, epochs=20, lr=1e-3, device=device)
