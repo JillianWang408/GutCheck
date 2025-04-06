@@ -1,5 +1,7 @@
 import torch
-import numpy
+import neurokit2
+import numpy as np
+import pandas as pd
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
@@ -11,16 +13,16 @@ class ConfidenceCNN(nn.Module):
         # conv layer 1
         self.cnv1 = nn.Sequential(
             nn.Conv1d(4, 16, kernel_size=5), # play with kernel size during train
-            nn.BatchNorm1d(16),
+            nn.LazyBatchNorm1d(),
             nn.ReLU(),
             nn.MaxPool1d(2),
-            nn.Dropout(0.05) # play with during train
+            #nn.Dropout(0.05) # play with during train
         )
 
         # conv layer 2
         self.cnv2 = nn.Sequential(
             nn.Conv1d(16, 32, kernel_size=3), # play with kernel size during train
-            nn.BatchNorm1d(32),
+            nn.LazyBatchNorm1d(),
             nn.ReLU(),
             nn.MaxPool1d(2),
             nn.Dropout(0.3) # play with during train
@@ -29,17 +31,17 @@ class ConfidenceCNN(nn.Module):
         # third conv layer - likely too little data to use
         #self.cn3 = nn.Sequential(
         #    nn.Conv1d(32, 64, kernel_size=5), # play with kernel size during train
-        #    nn.BatchNorm1d(64),
+        #    nn.LazyBatchNorm1d(),
         #    nn.ReLU(),
         #    nn.MaxPool1d(2),
         #    nn.Dropout(0.4)
         #)
 
-        self.global_pool = nn.AdaptiveAvgPool1d(1)
+        self.global_pool = nn.AdaptiveAvgPool1d(4)
 
         # output layer
         self.out = nn.Sequential(
-            nn.Linear(32, 64), # switch to (64, 64) if 3 conv layers
+            nn.Linear(32*4, 64), # switch to (64, 64) if 3 conv layers
             nn.ReLU(),
             nn.Dropout(0.5),
             nn.Linear(64, 1)
@@ -51,9 +53,8 @@ class ConfidenceCNN(nn.Module):
         x = self.global_pool(x)
         x = torch.flatten(x, 1)
         x = self.out(x)
-        return x
-    
-     
+        return x    
+
 # Training function
 def train(model, train_loader, val_loader=None, epochs=20, lr=1e-3, device="cpu"):
     model.to(device)
@@ -92,10 +93,17 @@ def validate(model, val_loader, criterion, device):
     avg_val_loss = val_loss / len(val_loader.dataset)
     print(f"Validation Loss: {avg_val_loss:.4f}")
 
+# to be implemented
+def preprocess(df):
+    coll = [
+        1 #placeholder
+    ]
+    df['conf'] = pd.DataFrame(np.array(coll).T)
+
 # Example dataset setup
-def get_data_loaders(batch_size=32):
-    X = torch.randn(500, 4, 256)
-    y = torch.rand(500)  # confidence score in [0, 1]
+def get_data_loaders(df):
+    X = df[:256]
+    y = df["conf"]  # confidence score in [0, 1]
 
     dataset = TensorDataset(X, y)
     train_len = int(0.8 * len(dataset))
